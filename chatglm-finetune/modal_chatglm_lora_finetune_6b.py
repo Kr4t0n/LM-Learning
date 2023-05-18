@@ -21,7 +21,7 @@ model_finetune_vol = modal.SharedVolume().persist("chatglm-finetune-vol")
     gpu="A10G",
     timeout=86400
 )
-def download():
+def download_chatglm_6b():
 
     from transformers import AutoTokenizer, AutoModel
 
@@ -56,7 +56,7 @@ def download():
     gpu="A10G",
     timeout=86400
 )
-def chatglm_alpaca_lora_6b():
+def train_chatglm_alpaca_lora_6b():
 
     import subprocess
 
@@ -90,7 +90,7 @@ def chatglm_alpaca_lora_6b():
     gpu="A10G",
     timeout=86400
 )
-def chatglm_alpaca_lora_6b_infer():
+def infer_chatglm_alpaca_lora_6b():
     import torch
 
     from peft import PeftModel
@@ -228,4 +228,4 @@ def fastapi_app():
 
 @stub.local_entrypoint()
 def main():
-    chatglm_alpaca_lora_6b.call()
+    train_chatglm_alpaca_lora_6b.call()
