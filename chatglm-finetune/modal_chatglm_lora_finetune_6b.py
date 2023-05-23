@@ -203,7 +203,7 @@ def fastapi_app():
         return Model().infer.call(text)
 
     title = "ChatGLM-6B Finetuned"
-    description = "ChatGLM-6B Finetunes over Alapaca Dataset using LoRA"
+    description = "ChatGLM-6B Finetuned over Alapaca Dataset using LoRA"
     examples = [
         "Instruction: you have a 6-gallon cup and a 7-gallon cup, how do you measure 4 gallons of water?\nAnswer: ",  # noqa
         "Instruction: you can solve math problem\nInput: you have a 6-gallon cup and a 7-gallon cup, how do you measure 4 gallons of water?\nAnswer: ",  # noqa
@@ -222,7 +222,7 @@ def fastapi_app():
     )
 
     return mount_gradio_app(
-        app=web_app, blocks=interface, path='/'
+        app=web_app, blocks=interface, path="/"
     )
 
 
