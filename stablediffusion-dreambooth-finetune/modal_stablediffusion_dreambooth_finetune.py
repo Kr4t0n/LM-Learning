@@ -60,7 +60,7 @@ class TrainConfig(SharedConfig):
 @dataclasses.dataclass
 class InferenceConfig(SharedConfig):
     prefix: str = "a photo of"
-    postfix: str = "swimming in a pool"
+    postfix: str = "swimming in the pool"
 
     num_inference_steps: int = 50
     guidance_scale: float = 7.5
@@ -94,7 +94,7 @@ def train_stablediffusion_dog_dreambooth():
     # define the training prompt
     instance_phrase = f"{config.instance_name} {config.class_name}"
     prompt = f"{config.prefix} {instance_phrase} {config.postfix}".strip()
-    validation_prompt = f"{config.validation_prefix} {instance_phrase} {config.validation_postfix}"  # noqa
+    validation_prompt = f"{config.validation_prefix} {instance_phrase} {config.validation_postfix}".strip()  # noqa
 
     # run training
     subprocess.run(
@@ -120,3 +120,52 @@ def train_stablediffusion_dog_dreambooth():
         ],
         check=True
     )
+
+
+@stub.function(
+    image=image,
+    gpu="A100",
+    shared_volumes={REMOTE_MODEL_DIR: model_finetune_vol},
+    timeout=86400
+)
+def infer_stablediffusion_dog_dreambooth():
+
+    import io
+    import torch
+
+    from diffusers import StableDiffusionPipeline
+
+    pipe = StableDiffusionPipeline.from_pretrained(
+        REMOTE_MODEL_DIR,
+        torch_dtype=torch.float16
+    ).to("cuda")
+
+    # set up inference config
+    config = InferenceConfig()
+
+    # define the inference prompt
+    instance_phrase = f'{config.instance_name} {config.class_name}'
+    prompt = f'{config.prefix} {instance_phrase} {config.postfix}'.strip()
+
+    image = pipe(
+        prompt,
+        num_inference_steps=config.num_inference_steps,
+        guidance_scale=config.guidance_scale
+    ).images[0]
+
+    with io.BytesIO() as buf:
+        image.save(buf, format="PNG")
+        image_bytes = buf.getvalue()
+
+    return image_bytes
+
+
+
+@stub.local_entrypoint()
+def main():
+
+    image_bytes = infer_stablediffusion_dog_dreambooth.call()
+
+    output_path = "output.png"
+    with open(output_path, "wb") as f:
+        f.write(image_bytes)
