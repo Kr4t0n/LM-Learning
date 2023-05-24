@@ -1,4 +1,12 @@
 import modal
+import dataclasses
+
+DATASET_DIR = "./dataset/alpaca"
+REMOTE_DATASET_DIR = "/root/dataset/alpaca"
+PROJECT_DIR = "."
+REMOTE_PROJECT_DIR = "/root/chatglm-finetune"
+REMOTE_MODEL_CACHE = "/root/.cache"
+REMOTE_MODEL_DIR = "/root/chatglm-finetune-output"
 
 stub = modal.Stub("modal-chatglm-lora-finetune-6b")
 image = modal.Image.debian_slim().pip_install(
@@ -11,6 +19,27 @@ image = modal.Image.debian_slim().pip_install(
 )
 model_cache_vol = modal.SharedVolume().persist("chatglm-cache-vol")
 model_finetune_vol = modal.SharedVolume().persist("chatglm-finetune-vol")
+
+
+@dataclasses.dataclass
+class TrainConfig:
+    per_device_train_batch_size: int = 6
+    gradient_accumulation_steps: int = 1
+    learning_rate: float = 1e-4
+    max_steps: int = 20000
+    save_steps: int = 5000
+    save_total_limit: int = 2
+    remove_unused_columns: bool = False
+
+    tracker: str = "wandb"
+    logging_steps: int = 100
+
+
+@dataclasses.dataclass
+class InferenceConfig:
+    max_length: int = 150
+    do_sample: bool = False
+    temperature: float = .0
 
 
 @stub.function(
@@ -41,17 +70,15 @@ def download_chatglm_6b():
 @stub.function(
     image=image,
     mounts=[
-        modal.Mount.from_local_dir(
-            ".",
-            remote_path="/root/chatglm-finetune"
-        )
+        modal.Mount.from_local_dir(PROJECT_DIR, remote_path=REMOTE_PROJECT_DIR),  # noqa
+        modal.Mount.from_local_dir(DATASET_DIR, remote_path=REMOTE_DATASET_DIR),  # noqa
     ],
     secrets=[
         modal.Secret.from_name("wandb-secret"),
         modal.Secret.from_name("huggingface-secret")
     ],
     shared_volumes={
-        "/root/chatglm-finetune-output": model_finetune_vol
+        REMOTE_MODEL_DIR: model_finetune_vol
     },
     gpu="A10G",
     timeout=86400
@@ -60,22 +87,31 @@ def train_chatglm_alpaca_lora_6b():
 
     import subprocess
 
+    from accelerate.utils import write_basic_config
+
+    # set up huggingface accelerate basic config
+    write_basic_config(mixed_precision="fp16")
+
+    # set up train config
+    config = TrainConfig()
+
     subprocess.run(
         [
-            "python",
-            "/root/chatglm-finetune/chatglm_lora_finetune_6b.py",
-            "--output_dir=/root/chatglm-finetune-output/6b_max_steps_20000",
-            "--dataset_path=/root/chatglm-finetune/dataset/alpaca",
-            "--per_device_train_batch_size=6",
-            "--gradient_accumulation_steps=1",
-            "--max_steps=20000",
-            "--save_steps=1000",
-            "--save_total_limit=2",
-            "--learning_rate=1e-4",
-            "--fp16=true",
-            "--remove_unused_columns=false",
-            "--report_to=wandb",
-            "--logging_steps=10"
+            "accelerate",
+            "launch",
+            f"{REMOTE_PROJECT_DIR}/chatglm_lora_finetune_6b.py",
+            f"--dataset_path={REMOTE_DATASET_DIR}",
+            f"--output_dir={REMOTE_MODEL_DIR}",
+            f"--per_device_train_batch_size={config.per_device_train_batch_size}",  # noqa
+            f"--gradient_accumulation_steps={config.gradient_accumulation_steps}",  # noqa
+            f"--learning_rate={config.learning_rate}",
+            f"--fp16=true",
+            f"--max_steps={config.max_steps}",
+            f"--save_steps={config.save_steps}",
+            f"--save_total_limit={config.save_total_limit}",
+            f"--remove_unused_columns={config.remove_unused_columns}",
+            f"--report_to={config.tracker}",
+            f"--logging_steps={config.logging_steps}"
         ],
         check=True
     )
@@ -84,8 +120,8 @@ def train_chatglm_alpaca_lora_6b():
 @stub.function(
     image=image,
     shared_volumes={
-        "/root/.cache": model_cache_vol,
-        "/root/chatglm-finetune-output": model_finetune_vol
+        REMOTE_MODEL_CACHE: model_cache_vol,
+        REMOTE_MODEL_DIR: model_finetune_vol
     },
     gpu="A10G",
     timeout=86400
@@ -95,6 +131,9 @@ def infer_chatglm_alpaca_lora_6b():
 
     from peft import PeftModel
     from transformers import AutoTokenizer, AutoModel
+
+    # set up inference config
+    config = InferenceConfig()
 
     model_name = "THUDM/chatglm-6b"
 
@@ -109,7 +148,7 @@ def infer_chatglm_alpaca_lora_6b():
     ).half()
     model = PeftModel.from_pretrained(
         model,
-        "/root/chatglm-finetune-output/6b_max_steps_20000"
+        REMOTE_MODEL_DIR
     )
 
     input_texts = [
@@ -127,9 +166,9 @@ def infer_chatglm_alpaca_lora_6b():
 
             out = model.generate(
                 input_ids=input_ids,
-                max_length=150,
-                do_sample=False,
-                temperature=0
+                max_length=config.max_length,
+                do_sample=config.do_sample,
+                temperature=config.temperature
             )
             out_text = tokenizer.decode(out[0])
             print(out_text)
@@ -138,8 +177,8 @@ def infer_chatglm_alpaca_lora_6b():
 @stub.cls(
     image=image,
     shared_volumes={
-        "/root/.cache": model_cache_vol,
-        "/root/chatglm-finetune-output": model_finetune_vol
+        REMOTE_MODEL_CACHE: model_cache_vol,
+        REMOTE_MODEL_DIR: model_finetune_vol
     },
     gpu="A10G"
 )
@@ -163,11 +202,11 @@ class Model:
         ).half()
         self.model = PeftModel.from_pretrained(
             self.model,
-            "/root/chatglm-finetune-output/6b_max_steps_20000"
+            REMOTE_MODEL_DIR
         )
 
     @modal.method()
-    def infer(self, input_text):
+    def infer(self, input_text, config):
 
         import torch
 
@@ -176,9 +215,9 @@ class Model:
 
         out = self.model.generate(
             input_ids=input_ids,
-            max_length=150,
-            do_sample=False,
-            temperature=0
+            max_length=config.max_length,
+            do_sample=config.do_sample,
+            temperature=config.temperature
         )
         out_text = self.tokenizer.decode(out[0])
 
@@ -199,8 +238,10 @@ def fastapi_app():
 
     web_app = FastAPI()
 
+    config = InferenceConfig()
+
     def infer(text):
-        return Model().infer.call(text)
+        return Model().infer.call(text, config)
 
     title = "ChatGLM-6B Finetuned"
     description = "ChatGLM-6B Finetuned over Alapaca Dataset using LoRA"
@@ -228,4 +269,4 @@ def fastapi_app():
 
 @stub.local_entrypoint()
 def main():
-    train_chatglm_alpaca_lora_6b.call()
+    infer_chatglm_alpaca_lora_6b.call()
