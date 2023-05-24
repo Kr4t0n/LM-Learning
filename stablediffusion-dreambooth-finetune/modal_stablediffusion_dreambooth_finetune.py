@@ -4,6 +4,7 @@ import dataclasses
 DATASET_DIR = "./dataset/dog"
 REMOTE_DATASET_DIR = "/root/dataset/dog"
 REMOTE_MODEL_DIR = "/root/stablediffusion-finetune-output"
+REMOTE_PROJECT_DIR = "/root/diffusers"
 
 
 stub = modal.Stub("modal-stablediffusion-dreambooth-finetune")
@@ -101,7 +102,7 @@ def train_stablediffusion_dog_dreambooth():
         [
             "accelerate",
             "launch",
-            "/root/diffusers/examples/dreambooth/train_dreambooth.py",
+            f"{REMOTE_PROJECT_DIR}/examples/dreambooth/train_dreambooth.py",
             f"--pretrained_model_name_or_path={config.model_name}",
             f"--instance_data_dir={REMOTE_DATASET_DIR}",
             f"--output_dir={REMOTE_MODEL_DIR}",
